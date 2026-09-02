@@ -49,3 +49,81 @@
 
   window.DS_MARENO_UPDATE={rate:RATE,effectiveDate:EFFECTIVE_DATE,apply:applyMarenoIncrease};
 })();
+
+/* DS Parts · Exportador VCF compatible Android / Google Contacts
+   Formato mínimo vCard 3.0, sin campos Apple, sin Zona Oeste y sin duplicados. */
+(()=>{
+  'use strict';
+  const normText=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
+  const ZONA_OESTE=new Set([
+    'MORON','HAEDO','CASTELAR','ITUZAINGO','HURLINGHAM','RAMOS MEJIA','CIUDADELA','CASEROS','LINIERS',
+    'VILLA SARMIENTO','ISIDRO CASANOVA','PARQUE LELOIR','VILLA UDAONDO','SAN JUSTO','LA TABLADA',
+    'VILLA LUZURIAGA','RAFAEL CASTILLO','GREGORIO DE LAFERRERE','GONZALEZ CATAN','MERLO',
+    'SAN ANTONIO DE PADUA','LIBERTAD','MARCO PAZ','MARCOS PAZ'
+  ]);
+
+  const isZonaOeste=c=>{
+    const l=normText(c?.localidad);
+    if(ZONA_OESTE.has(l))return true;
+    const n=normText(c?.nombre);
+    return n.includes('DS PARTS Z/O')||n.includes('ZONA OESTE');
+  };
+
+  const vEsc=s=>String(s||'')
+    .replace(/\\/g,'\\\\')
+    .replace(/\r?\n/g,'\\n')
+    .replace(/;/g,'\\;')
+    .replace(/,/g,'\\,');
+
+  function normalizePhone(c){
+    const isWa=Boolean(c?.whatsapp);
+    let raw=String(c?.whatsapp||c?.telefono||'').trim();
+    let d=raw.replace(/\D/g,'');
+    if(!d)return'';
+    if(d.startsWith('00'))d=d.slice(2);
+    if(d.startsWith('54'))return'+'+d;
+    while(d.startsWith('0'))d=d.slice(1);
+    if(d.length===8)d='11'+d;
+    if(isWa&&d.startsWith('11')&&d.length===10)d='9'+d;
+    if(d.length>=10&&d.length<=13)return'+54'+d;
+    if(d.length>=8&&d.length<=15)return'+'+d;
+    return'';
+  }
+
+  window.exportVCF=function(){
+    if(typeof DATA==='undefined'||!DATA||!Array.isArray(DATA.contacts)){
+      alert('La base de contactos todavía no está disponible.');
+      return;
+    }
+    const seen=new Set();
+    const rows=[];
+    for(const base of DATA.contacts){
+      const c=(typeof rec==='function'&&base?.id)?rec(base.id):base;
+      if(!c||isZonaOeste(c))continue;
+      const phone=normalizePhone(c);
+      if(!phone)continue;
+      const key=phone.replace(/\D/g,'');
+      if(seen.has(key))continue;
+      seen.add(key);
+      const locality=String(c.localidad||'').trim();
+      const business=String(c.nombre||'Contacto').trim();
+      const name=`DS Parts - ${locality?locality+' - ':''}${business}`;
+      rows.push([
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        `N:${vEsc(name)};;;;`,
+        `FN:${vEsc(name)}`,
+        `TEL;TYPE=CELL:${phone}`,
+        'END:VCARD'
+      ].join('\r\n'));
+    }
+    if(!rows.length){
+      alert('No se encontraron contactos con teléfono fuera de Zona Oeste.');
+      return;
+    }
+    const body='\ufeff'+rows.join('\r\n')+'\r\n';
+    dl('DS_Parts_WhatsApp_SIN_Zona_Oeste_Compatible.vcf',body,'text/vcard;charset=utf-8');
+    const sm=document.querySelector('#syncMini');
+    if(sm)sm.textContent=`VCF compatible generado · ${rows.length} contactos`;
+  };
+})();
